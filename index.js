@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, PermissionFlagsBits, REST, Routes, SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 const client = new Client({
   intents: [
@@ -9,21 +9,124 @@ const client = new Client({
   ]
 });
 
-// Map pour suivre la fréquence et stocker les messages des utilisateurs
-const userMessageMap = new Map();
+// Maps pour stocker les données du bot
+const userMessageMap = new Map(); // Anti-spam
+const warningsMap = new Map();    // Stockage des warns (userId -> tableau de warns)
 
-// Configuration Anti-Spam
-const LIMIT_MESSAGES = 5; // Nombre max de messages tolérés
-const TIME_WINDOW = 5000;  // Fenêtre de 5 secondes (5000 ms)
+// Configurations
+const LIMIT_MESSAGES = 3; 
+const TIME_WINDOW = 5000;  
 
-client.once('ready', () => {
+// Définition des commandes Slash
+const commands = [
+  new SlashCommandBuilder()
+    .setName('clear')
+    .setDescription('Supprime un nombre précis de messages')
+    .addIntegerOption(option =>
+      option.setName('nombre')
+        .setDescription('Nombre de messages à supprimer (1-99)')
+        .setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(99)
+    ),
+  new SlashCommandBuilder()
+    .setName('spam')
+    .setDescription('Fait répéter un texte au bot (Modérateur)')
+    .addIntegerOption(option =>
+      option.setName('nombre')
+        .setDescription('Nombre de répétitions (1-20)')
+        .setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(20)
+    )
+    .addStringOption(option =>
+      option.setName('texte')
+        .setDescription('Le texte à répéter')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('warn')
+    .setDescription('Donne un avertissement à un membre (Modérateur)')
+    .addUserOption(option =>
+      option.setName('membre')
+        .setDescription('Le membre à avertir')
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option.setName('raison')
+        .setDescription('La raison de l avertissement')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('warnings')
+    .setDescription('Affiche les avertissements d un membre')
+    .addUserOption(option =>
+      option.setName('membre')
+        .setDescription('Le membre dont tu veux voir les warns')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('timeout')
+    .setDescription('Rend muet temporairement un membre (Modérateur)')
+    .addUserOption(option =>
+      option.setName('membre')
+        .setDescription('Le membre à rendre muet')
+        .setRequired(true)
+    )
+    .addIntegerOption(option =>
+      option.setName('minutes')
+        .setDescription('Durée en minutes (1 à 1440)')
+        .setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(1440)
+    )
+    .addStringOption(option =>
+      option.setName('raison')
+        .setDescription('La raison du mute')
+        .setRequired(false)
+    ),
+  new SlashCommandBuilder()
+    .setName('userinfo')
+    .setDescription('Affiche les informations d un utilisateur')
+    .addUserOption(option =>
+      option.setName('membre')
+        .setDescription('Le membre à analyser')
+        .setRequired(false)
+    )
+];
+
+client.once('ready', async () => {
   console.log(`Bot prêt ! Connecté en tant que ${client.user.tag}`);
+
+  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+  try {
+    console.log('Enregistrement des commandes slash...');
+    await rest.put(
+      Routes.applicationCommands(client.user.id),
+      { body: commands.map(cmd => cmd.toJSON()) },
+    );
+    console.log('Commandes slash enregistrées avec succès !');
+  } catch (error) {
+    console.error(error);
+  }
 });
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
 
-  // --- SYSTÈME ANTI-SPAM (SUPPRESSION DE TOUT L'HISTORIQUE RÉCENT) ---
+  // --- 1. FILTRE ANTI-INVITATION DISCORD ---
+  const inviteRegex = /(https?:\/\/)?(www\.)?(discord\.(gg|io|me|li|club)|discordapp\.com\/invite|discord\.com\/invite)\/[a-zA-Z0-9]+/i;
+  if (inviteRegex.test(message.content)) {
+    // Si l'auteur n'est pas modérateur, on supprime le lien
+    if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
+      await message.delete().catch(() => {});
+      const warningMsg = await message.channel.send(`⚠️ ${message.author}, les liens d'invitation vers d'autres serveurs sont interdits ici !`);
+      setTimeout(() => warningMsg.delete().catch(() => {}), 4000);
+      return;
+    }
+  }
+
+  // --- 2. SYSTÈME ANTI-SPAM AUTOMATIQUE ---
   const userId = message.author.id;
   const now = Date.now();
 
@@ -32,86 +135,150 @@ client.on('messageCreate', async (message) => {
   }
 
   const userHistory = userMessageMap.get(userId);
-  // On ajoute le message actuel à l'historique
   userHistory.push({ time: now, msg: message });
 
-  // Conserver uniquement les messages envoyés dans les 5 dernières secondes
   const recentHistory = userHistory.filter(entry => now - entry.time < TIME_WINDOW);
   userMessageMap.set(userId, recentHistory);
 
-  // Détection du dépassement de limite
   if (recentHistory.length > LIMIT_MESSAGES) {
     if (message.channel.permissionsFor(message.guild.members.me).has(PermissionFlagsBits.ManageMessages)) {
-      
-      // Récupérer et supprimer tous les messages récents envoyés par cet utilisateur
       const messagesToDelete = recentHistory.map(entry => entry.msg);
       
       try {
         await message.channel.bulkDelete(messagesToDelete, true);
       } catch (err) {
-        // En cas d'échec de suppression en masse, suppression un par un
         for (const entry of recentHistory) {
           await entry.msg.delete().catch(() => {});
         }
       }
 
-      // Vider l'historique pour cet utilisateur après suppression
       userMessageMap.set(userId, []);
 
-      // Avertissement dans le salon
-      const warning = await message.channel.send(`⚠️ ${message.author}, le spam est interdit ! Tous tes récents messages ont été supprimés.`);
+      const warning = await message.channel.send(`⚠️ ${message.author}, le spam est limité à 3 messages d'affilée ! Tout a été supprimé.`);
       setTimeout(() => warning.delete().catch(() => {}), 4000);
       return;
     }
   }
+});
 
-  // --- COMMANDES BOT ---
-  const args = message.content.trim().split(/ +/);
-  const command = args.shift().toLowerCase();
+// --- GESTION DES COMMANDES SLASH ---
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
 
-  // Commande de suppression (!clear <nombre>)
-  if (command === '!clear' || command === '!clean') {
-    if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
-      return message.reply("Tu n'as pas la permission de gérer les messages !");
+  const { commandName } = interaction;
+
+  // /clear
+  if (commandName === 'clear') {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
+      return interaction.reply({ content: "Tu n'as pas la permission de gérer les messages !", ephemeral: true });
     }
 
-    const amount = parseInt(args[0]);
-    if (isNaN(amount) || amount < 1 || amount > 99) {
-      return message.reply("Indique un nombre entre 1 et 99. Exemple : `!clear 10`");
-    }
+    const amount = interaction.options.getInteger('nombre');
+    await interaction.deferReply({ ephemeral: true });
 
     try {
-      await message.channel.bulkDelete(amount + 1, true);
-      const msg = await message.channel.send(`🧹 **${amount}** message(s) supprimé(s) !`);
-      setTimeout(() => msg.delete().catch(() => {}), 3000);
+      const deleted = await interaction.channel.bulkDelete(amount, true);
+      await interaction.editReply(`🧹 **${deleted.size}** message(s) supprimé(s) avec succès !`);
     } catch (error) {
       console.error(error);
-      message.reply("Erreur lors de la suppression (messages trop anciens ?).");
+      await interaction.editReply("Erreur lors de la suppression (les messages de plus de 14 jours ne peuvent pas être supprimés).");
     }
   }
 
-  // Commande de spam manuel (!spam <nombre> <texte>)
-  if (command === '!spam') {
-    if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
-      return message.reply("Seuls les modérateurs peuvent utiliser la commande spam !");
+  // /spam
+  if (commandName === 'spam') {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
+      return interaction.reply({ content: "Seuls les modérateurs peuvent utiliser cette commande !", ephemeral: true });
     }
 
-    const count = parseInt(args[0]);
-    const text = args.slice(1).join(' ');
+    const count = interaction.options.getInteger('nombre');
+    const text = interaction.options.getString('texte');
 
-    if (isNaN(count) || count < 1 || count > 20) {
-      return message.reply("Indique un nombre entre 1 et 20. Exemple : `!spam 5 Coucou`");
-    }
-
-    if (!text) {
-      return message.reply("Tu dois écrire le texte à répéter. Exemple : `!spam 5 Salut`");
-    }
-
-    await message.delete().catch(() => {});
+    await interaction.reply({ content: "Envoi du spam en cours...", ephemeral: true });
 
     for (let i = 0; i < count; i++) {
-      await message.channel.send(text);
+      await interaction.channel.send(text);
     }
+  }
+
+  // /warn
+  if (commandName === 'warn') {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
+      return interaction.reply({ content: "Tu n'as pas la permission d'avertir des membres !", ephemeral: true });
+    }
+
+    const target = interaction.options.getUser('membre');
+    const reason = interaction.options.getString('raison');
+
+    if (!warningsMap.has(target.id)) {
+      warningsMap.set(target.id, []);
+    }
+
+    warningsMap.get(target.id).push({
+      reason: reason,
+      moderator: interaction.user.tag,
+      date: new Date().toLocaleDateString()
+    });
+
+    await interaction.reply({ content: `⚠️ **${target.tag}** a reçu un avertissement.\n**Raison :** ${reason}`, ephemeral: false });
+  }
+
+  // /warnings
+  if (commandName === 'warnings') {
+    const target = interaction.options.getUser('membre');
+    const userWarns = warningsMap.get(target.id) || [];
+
+    if (userWarns.length === 0) {
+      return interaction.reply({ content: `✅ **${target.tag}** n'a aucun avertissement à son actif.`, ephemeral: true });
+    }
+
+    let description = userWarns.map((w, index) => `**${index + 1}.**${w.reason} *(Modérateur : ${w.moderator} -${w.date})*`).join('\n');
+
+    const embed = new EmbedBuilder()
+      .setTitle(`Avertissements de ${target.tag}`)
+      .setDescription(description)
+      .setColor('#ffcc00');
+
+    await interaction.reply({ embeds: [embed], ephemeral: true });
+  }
+
+  // /timeout (Mute)
+  if (commandName === 'timeout') {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+      return interaction.reply({ content: "Tu n'as pas la permission de rendre des membres muets !", ephemeral: true });
+    }
+
+    const member = interaction.options.getMember('membre');
+    const minutes = interaction.options.getInteger('minutes');
+    const reason = interaction.options.getString('raison') || "Aucune raison spécifiée";
+
+    try {
+      const durationMs = minutes * 60 * 1000;
+      await member.timeout(durationMs, reason);
+      await interaction.reply({ content: `🔇 **${member.user.tag}`} a été mis en sourdine pendant **${minutes} minute(s)**.\n**Raison :** ${reason}`, ephemeral: false });
+    } catch (error) {
+      console.error(error);
+      await interaction.reply({ content: "Impossible de rendre ce membre muet (vérifie que le bot a un rôle supérieur au sien).", ephemeral: true });
+    }
+  }
+
+  // /userinfo
+  if (commandName === 'userinfo') {
+    const member = interaction.options.getMember('membre') || interaction.member;
+    const user = member.user;
+
+    const embed = new EmbedBuilder()
+      .setTitle(`Informations sur ${user.tag}`)
+      .setThumbnail(user.displayAvatarURL({ dynamic: true }))
+      .addFields(
+        { name: 'Nom d utilisateur', value: user.tag, inline: true },
+        { name: 'ID', value: user.id, inline: true },
+        { name: 'Création du compte', value: `<t:${Math.floor(user.createdTimestamp / 1000)}:R>`, inline: true },
+        { name: 'Arrivée sur le serveur', value: `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>`, inline: true }
+      )
+      .setColor('#0099ff');
+
+    await interaction.reply({ embeds: [embed], ephemeral: true });
   }
 });
 
