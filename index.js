@@ -1,5 +1,5 @@
-
-    const { Client, GatewayIntentBits, PermissionFlagsBits, REST, Routes, SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, PermissionFlagsBits, REST, Routes, SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { GoogleGenAI } = require('@google/genai');
 
 const client = new Client({
   intents: [
@@ -10,16 +10,16 @@ const client = new Client({
   ]
 });
 
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
 const userMessageMap = new Map();
 const warningsMap = new Map();
 
 const LIMIT_MESSAGES = 3; 
 const TIME_WINDOW = 5000;  
 
-// 🆔 Tes vrais ID configurés
-const ROLE_WARN_1_ID = '1550754107978022912'; 
-const ROLE_WARN_2_ID = '1550754764025765890'; 
-const ROLE_MEMBRE_ID = '1524099902542577735'; 
+const ROLE_WARN_1_ID = 'ID_ROLE_PREMIER_WARN'; 
+const ROLE_WARN_2_ID = 'ID_ROLE_DEUXIEME_WARN'; 
 
 const commands = [
   new SlashCommandBuilder()
@@ -98,7 +98,7 @@ const commands = [
     ),
   new SlashCommandBuilder()
     .setName('lock')
-    .setDescription('Verrouille le salon pour le rôle membre (Modérateur)')
+    .setDescription('Verrouille le salon (Seul le staff/fonda garde l accès) (Modérateur)')
     .addStringOption(option =>
       option.setName('raison')
         .setDescription('La raison du verrouillage')
@@ -106,7 +106,7 @@ const commands = [
     ),
   new SlashCommandBuilder()
     .setName('unlock')
-    .setDescription('Déverrouille le salon pour le rôle membre (Modérateur)'),
+    .setDescription('Déverrouille le salon (Modérateur)'),
   new SlashCommandBuilder()
     .setName('userinfo')
     .setDescription('Affiche les informations d un utilisateur')
@@ -138,6 +138,33 @@ client.once('ready', async () => {
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
 
+  // --- GESTION DES TICKETS AVEC L'IA ---
+  const categoryName = message.channel.parent ? message.channel.parent.name.toLowerCase() : '';
+  const channelName = message.channel.name.toLowerCase();
+
+  if (categoryName.includes('ticket') || channelName.includes('ticket')) {
+    await message.channel.sendTyping();
+
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: `Tu es l'assistant virtuel d'un serveur Discord. Un utilisateur a ouvert un ticket et a écrit : "${message.content}". Réponds-lui poliment en français pour l'aider, le renseigner sur sa question ou sa demande de rôle, et dis-lui qu'un membre du staff peut prendre le relais si besoin.` }]
+          }
+        ]
+      });
+
+      const aiReply = response.text || "Je n'ai pas pu analyser ta demande, un membre du staff va arriver.";
+      await message.reply(aiReply);
+    } catch (error) {
+      console.error("Erreur IA Ticket :", error);
+    }
+    return;
+  }
+
+  // --- ANTI-LIENS D'INVITATION ---
   const inviteRegex = /(https?:\/\/)?(www\.)?(discord\.(gg|io|me|li|club)|discordapp\.com\/invite|discord\.com\/invite)\/[a-zA-Z0-9]+/i;
   if (inviteRegex.test(message.content)) {
     if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
@@ -148,6 +175,7 @@ client.on('messageCreate', async (message) => {
     }
   }
 
+  // --- ANTI-SPAM ---
   const userId = message.author.id;
   const now = Date.now();
 
@@ -243,7 +271,7 @@ client.on('interactionCreate', async (interaction) => {
 
     if (targetMember) {
       try {
-        if (userWarns.length === 1) {
+        if (userWarns.length === 1 && ROLE_WARN_1_ID !== 'ID_ROLE_PREMIER_WARN') {
           await targetMember.roles.add(ROLE_WARN_1_ID);
           sanctionMessage += `\n*(Rôle "Warn 1" attribué automatiquement)*`;
         } 
@@ -251,9 +279,10 @@ client.on('interactionCreate', async (interaction) => {
           await targetMember.timeout(10 * 60 * 1000, `Sanction automatique : 2ème avertissement.`);
           sanctionMessage += `\n🚨 **Sanction automatique (2ème avertissement) :** Timeout de 10 minutes appliqué !`;
 
-          await targetMember.roles.remove(ROLE_WARN_1_ID).catch(() => {});
-          await targetMember.roles.add(ROLE_WARN_2_ID);
-          sanctionMessage += ` + Rôle "Warn 2" attribué.`;
+          if (ROLE_WARN_2_ID !== 'ID_ROLE_DEUXIEME_WARN') {
+            await targetMember.roles.add(ROLE_WARN_2_ID);
+            sanctionMessage += ` + Rôle "Warn 2" attribué.`;
+          }
         }
       } catch (err) {
         console.error("Erreur attribution rôle/timeout :", err);
@@ -296,8 +325,12 @@ client.on('interactionCreate', async (interaction) => {
 
     if (targetMember) {
       try {
-        await targetMember.roles.remove(ROLE_WARN_1_ID).catch(() => {});
-        await targetMember.roles.remove(ROLE_WARN_2_ID).catch(() => {});
+        if (ROLE_WARN_1_ID && ROLE_WARN_1_ID !== 'ID_ROLE_PREMIER_WARN') {
+          await targetMember.roles.remove(ROLE_WARN_1_ID).catch(() => {});
+        }
+        if (ROLE_WARN_2_ID && ROLE_WARN_2_ID !== 'ID_ROLE_DEUXIEME_WARN') {
+          await targetMember.roles.remove(ROLE_WARN_2_ID).catch(() => {});
+        }
       } catch (err) {
         console.error("Erreur lors du retrait des rôles :", err);
       }
@@ -333,13 +366,13 @@ client.on('interactionCreate', async (interaction) => {
     const reason = interaction.options.getString('raison') || "Aucune raison spécifiée";
 
     try {
-      await interaction.channel.permissionOverwrites.edit(ROLE_MEMBRE_ID, {
+      await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
         SendMessages: false
       });
 
       const embed = new EmbedBuilder()
         .setTitle('🔒 Salon Verrouillé')
-        .setDescription(`Ce salon a été verrouillé pour le rôle membre.\n**Raison :** ${reason}`)
+        .setDescription(`Ce salon a été verrouillé pour les membres.\n**Raison :** ${reason}`)
         .setColor('#ff0000');
 
       await interaction.reply({ embeds: [embed] });
@@ -355,13 +388,13 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     try {
-      await interaction.channel.permissionOverwrites.edit(ROLE_MEMBRE_ID, {
+      await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
         SendMessages: null
       });
 
       const embed = new EmbedBuilder()
         .setTitle('🔓 Salon Déverrouillé')
-        .setDescription('Ce salon a été déverrouillé pour le rôle membre.')
+        .setDescription('Ce salon a été déverrouillé. Tout le monde peut de nouveau écrire.')
         .setColor('#00ff00');
 
       await interaction.reply({ embeds: [embed] });
@@ -382,8 +415,7 @@ client.on('interactionCreate', async (interaction) => {
         { name: 'Nom d utilisateur', value: user.tag, inline: true },
         { name: 'ID', value: user.id, inline: true },
         { name: 'Création du compte', value: `<t:${Math.floor(user.createdTimestamp / 1000)}:R>`, inline: true },
-        { name: 'Arrivée sur le serveur', value: `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>`, inline: true }
-      )
+        { name: 'Arrivée sur le serveur', value: `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>`, inline: true })
       .setColor('#0099ff');
 
     await interaction.reply({ embeds: [embed], ephemeral: true });
