@@ -18,8 +18,8 @@ const warningsMap = new Map();
 const LIMIT_MESSAGES = 3; 
 const TIME_WINDOW = 5000;  
 
-const ROLE_WARN_1_ID = 'ID_ROLE_PREMIER_WARN'; 
-const ROLE_WARN_2_ID = 'ID_ROLE_DEUXIEME_WARN'; 
+const ROLE_WARN_1_ID = '1550754107978022912'; 
+const ROLE_WARN_2_ID = '1550754764025765890'; 
 
 const commands = [
   new SlashCommandBuilder()
