@@ -15,9 +15,9 @@ const warningsMap = new Map();
 const LIMIT_MESSAGES = 3; 
 const TIME_WINDOW = 5000;  
 
-// Rôles configurés pour les avertissements
-const ROLE_WARN_1_ID = '1550754107978022912'; // Rôle attribué au 1er warn
-const ROLE_WARN_2_ID = '1550754764025765890'; // Rôle attribué au 2ème warn
+// ID de tes rôles configurés
+const ROLE_WARN_1_ID = '1550754107978022912'; 
+const ROLE_WARN_2_ID = '1550754764025765890'; 
 
 const commands = [
   new SlashCommandBuilder()
@@ -64,6 +64,14 @@ const commands = [
     .addUserOption(option =>
       option.setName('membre')
         .setDescription('Le membre dont tu veux voir les warns')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('pardon')
+    .setDescription('Efface tous les warns et retire les rôles de sanction (Modérateur)')
+    .addUserOption(option =>
+      option.setName('membre')
+        .setDescription('Le membre à pardonner')
         .setRequired(true)
     ),
   new SlashCommandBuilder()
@@ -223,20 +231,21 @@ client.on('interactionCreate', async (interaction) => {
     if (targetMember) {
       try {
         if (userWarns.length === 1) {
-          // 1er warn : Attribution du rôle du 1er warn
           await targetMember.roles.add(ROLE_WARN_1_ID);
-          sanctionMessage += `\n*(Rôle du 1er avertissement attribué automatiquement)*`;
+          sanctionMessage += `\n*(Rôle "Warn 🛠️ 1" attribué automatiquement)*`;
         } 
         else if (userWarns.length >= 2) {
-          // 2ème warn : Timeout de 10 minutes + Attribution du rôle du 2ème warn (et retrait optionnel du 1er si besoin)
-          await targetMember.timeout(10 * 60 * 1000, `Sanction automatique : 2ème avertissement.`);
-          await targetMember.roles.add(ROLE_WARN_2_ID);
+          // Retire le rôle du 1er warn pour basculer sur le 2ème proprement (optionnel mais propre)
+          await targetMember.roles.remove(ROLE_WARN_1_ID).catch(() => {});
           
-          sanctionMessage += `\n🚨 **Sanction automatique (2ème avertissement) :** Timeout de 10 minutes + Rôle de 2ème avertissement attribué !`;
+          await targetMember.roles.add(ROLE_WARN_2_ID);
+          await targetMember.timeout(10 * 60 * 1000, `Sanction automatique : 2ème avertissement.`);
+          
+          sanctionMessage += `\n🚨 **Sanction automatique (2ème avertissement) :** Rôle "Warn 🛠️ 2" attribué + Timeout de 10 minutes appliqué !`;
         }
       } catch (err) {
         console.error("Erreur attribution rôle/timeout :", err);
-        sanctionMessage += ` *(Erreur : vérifie que le rôle du bot est bien placé au-dessus de ces rôles dans les paramètres)*`;
+        sanctionMessage += `\n*(Erreur : vérifie que le rôle du bot est bien placé au-dessus des rôles de warn dans les paramètres)*`;
       }
     }
 
@@ -259,7 +268,31 @@ client.on('interactionCreate', async (interaction) => {
       .setColor('#ffcc00');
 
     await interaction.reply({ embeds: [embed], ephemeral: true });
+  }
+
+  if (commandName === 'pardon') {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
+      return interaction.reply({ content: "Tu n'as pas la permission de pardonner des membres !", ephemeral: true });
     }
+
+    const targetUser = interaction.options.getUser('membre');
+    const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+
+    if (warningsMap.has(targetUser.id)) {
+      warningsMap.delete(targetUser.id);
+    }
+
+    if (targetMember) {
+      try {
+        await targetMember.roles.remove(ROLE_WARN_1_ID).catch(() => {});
+        await targetMember.roles.remove(ROLE_WARN_2_ID).catch(() => {});
+      } catch (err) {
+        console.error("Erreur lors du retrait des rôles :", err);
+      }
+    }
+
+    await interaction.reply({ content: `✅ Le casier de **${targetUser.tag}** a été remis à zéro (warns effacés et rôles retirés).`, ephemeral: false });
+  }
 
   if (commandName === 'timeout') {
     if (!interaction.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
