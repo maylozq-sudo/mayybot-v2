@@ -1,5 +1,4 @@
 const { Client, GatewayIntentBits, PermissionFlagsBits, REST, Routes, SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { GoogleGenAI } = require('@google/genai');
 
 const client = new Client({
   intents: [
@@ -9,8 +8,6 @@ const client = new Client({
     GatewayIntentBits.GuildMembers
   ]
 });
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const userMessageMap = new Map();
 const warningsMap = new Map();
@@ -138,32 +135,6 @@ client.once('ready', async () => {
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
 
-  // --- GESTION DES TICKETS AVEC L'IA ---
-  const categoryName = message.channel.parent ? message.channel.parent.name.toLowerCase() : '';
-  const channelName = message.channel.name.toLowerCase();
-
-  if (categoryName.includes('ticket') || channelName.includes('ticket')) {
-    await message.channel.sendTyping();
-
-    try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: `Tu es l'assistant virtuel d'un serveur Discord. Un utilisateur a ouvert un ticket et a écrit : "${message.content}". Réponds-lui poliment en français pour l'aider, le renseigner sur sa question ou sa demande de rôle, et dis-lui qu'un membre du staff peut prendre le relais si besoin.` }]
-          }
-        ]
-      });
-
-      const aiReply = response.text || "Je n'ai pas pu analyser ta demande, un membre du staff va arriver.";
-      await message.reply(aiReply);
-    } catch (error) {
-      console.error("Erreur IA Ticket :", error);
-    }
-    return;
-  }
-
   // --- ANTI-LIENS D'INVITATION ---
   const inviteRegex = /(https?:\/\/)?(www\.)?(discord\.(gg|io|me|li|club)|discordapp\.com\/invite|discord\.com\/invite)\/[a-zA-Z0-9]+/i;
   if (inviteRegex.test(message.content)) {
@@ -271,7 +242,7 @@ client.on('interactionCreate', async (interaction) => {
 
     if (targetMember) {
       try {
-        if (userWarns.length === 1 && ROLE_WARN_1_ID !== 'ID_ROLE_PREMIER_WARN') {
+        if (userWarns.length === 1) {
           await targetMember.roles.add(ROLE_WARN_1_ID);
           sanctionMessage += `\n*(Rôle "Warn 1" attribué automatiquement)*`;
         } 
@@ -279,10 +250,9 @@ client.on('interactionCreate', async (interaction) => {
           await targetMember.timeout(10 * 60 * 1000, `Sanction automatique : 2ème avertissement.`);
           sanctionMessage += `\n🚨 **Sanction automatique (2ème avertissement) :** Timeout de 10 minutes appliqué !`;
 
-          if (ROLE_WARN_2_ID !== 'ID_ROLE_DEUXIEME_WARN') {
-            await targetMember.roles.add(ROLE_WARN_2_ID);
-            sanctionMessage += ` + Rôle "Warn 2" attribué.`;
-          }
+          await targetMember.roles.remove(ROLE_WARN_1_ID).catch(() => {});
+          await targetMember.roles.add(ROLE_WARN_2_ID);
+          sanctionMessage += ` + Rôle "Warn 2" attribué.`;
         }
       } catch (err) {
         console.error("Erreur attribution rôle/timeout :", err);
@@ -325,12 +295,8 @@ client.on('interactionCreate', async (interaction) => {
 
     if (targetMember) {
       try {
-        if (ROLE_WARN_1_ID && ROLE_WARN_1_ID !== 'ID_ROLE_PREMIER_WARN') {
-          await targetMember.roles.remove(ROLE_WARN_1_ID).catch(() => {});
-        }
-        if (ROLE_WARN_2_ID && ROLE_WARN_2_ID !== 'ID_ROLE_DEUXIEME_WARN') {
-          await targetMember.roles.remove(ROLE_WARN_2_ID).catch(() => {});
-        }
+        await targetMember.roles.remove(ROLE_WARN_1_ID).catch(() => {});
+        await targetMember.roles.remove(ROLE_WARN_2_ID).catch(() => {});
       } catch (err) {
         console.error("Erreur lors du retrait des rôles :", err);
       }
