@@ -15,6 +15,10 @@ const warningsMap = new Map();
 const LIMIT_MESSAGES = 3; 
 const TIME_WINDOW = 5000;  
 
+// Rôles configurés pour les avertissements
+const ROLE_WARN_1_ID = '1550754107978022912'; // Rôle attribué au 1er warn
+const ROLE_WARN_2_ID = '1550754764025765890'; // Rôle attribué au 2ème warn
+
 const commands = [
   new SlashCommandBuilder()
     .setName('clear')
@@ -97,9 +101,6 @@ client.once('ready', async () => {
 
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   try {
-    console.log('Enregistrement instantané des commandes sur le serveur...');
-    
-    // Récupère le premier serveur (guild) où le bot est connecté pour forcer l'affichage immédiat
     const guilds = await client.guilds.fetch();
     for (const [guildId] of guilds) {
       await rest.put(
@@ -202,20 +203,44 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.reply({ content: "Tu n'as pas la permission d'avertir des membres !", ephemeral: true });
     }
 
-    const target = interaction.options.getUser('membre');
+    const targetUser = interaction.options.getUser('membre');
+    const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
     const reason = interaction.options.getString('raison');
 
-    if (!warningsMap.has(target.id)) {
-      warningsMap.set(target.id, []);
+    if (!warningsMap.has(targetUser.id)) {
+      warningsMap.set(targetUser.id, []);
     }
 
-    warningsMap.get(target.id).push({
+    const userWarns = warningsMap.get(targetUser.id);
+    userWarns.push({
       reason: reason,
       moderator: interaction.user.tag,
       date: new Date().toLocaleDateString()
     });
 
-    await interaction.reply({ content: `⚠️ **${target.tag}** a reçu un avertissement.\n**Raison :** ${reason}`, ephemeral: false });
+    let sanctionMessage = `⚠️ **${targetUser.tag}** a reçu son **${userWarns.length}e avertissement**.\n**Raison :** ${reason}`;
+
+    if (targetMember) {
+      try {
+        if (userWarns.length === 1) {
+          // 1er warn : Attribution du rôle du 1er warn
+          await targetMember.roles.add(ROLE_WARN_1_ID);
+          sanctionMessage += `\n*(Rôle du 1er avertissement attribué automatiquement)*`;
+        } 
+        else if (userWarns.length >= 2) {
+          // 2ème warn : Timeout de 10 minutes + Attribution du rôle du 2ème warn (et retrait optionnel du 1er si besoin)
+          await targetMember.timeout(10 * 60 * 1000, `Sanction automatique : 2ème avertissement.`);
+          await targetMember.roles.add(ROLE_WARN_2_ID);
+          
+          sanctionMessage += `\n🚨 **Sanction automatique (2ème avertissement) :** Timeout de 10 minutes + Rôle de 2ème avertissement attribué !`;
+        }
+      } catch (err) {
+        console.error("Erreur attribution rôle/timeout :", err);
+        sanctionMessage += ` *(Erreur : vérifie que le rôle du bot est bien placé au-dessus de ces rôles dans les paramètres)*`;
+      }
+    }
+
+    await interaction.reply({ content: sanctionMessage, ephemeral: false });
   }
 
   if (commandName === 'warnings') {
@@ -234,7 +259,7 @@ client.on('interactionCreate', async (interaction) => {
       .setColor('#ffcc00');
 
     await interaction.reply({ embeds: [embed], ephemeral: true });
-  }
+    }
 
   if (commandName === 'timeout') {
     if (!interaction.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
