@@ -1,4 +1,5 @@
-const { Client, GatewayIntentBits, PermissionFlagsBits, REST, Routes, SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+
+    const { Client, GatewayIntentBits, PermissionFlagsBits, REST, Routes, SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 const client = new Client({
   intents: [
@@ -15,10 +16,10 @@ const warningsMap = new Map();
 const LIMIT_MESSAGES = 3; 
 const TIME_WINDOW = 5000;  
 
-// ID de tes rôles
-const ROLE_WARN_1_ID = 'ID_ROLE_PREMIER_WARN'; 
-const ROLE_WARN_2_ID = 'ID_ROLE_DEUXIEME_WARN'; 
-const ROLE_MEMBRE_ID = '1524099902542577735'; // ID du rôle à bloquer lors du lock
+// 🆔 Tes vrais ID configurés
+const ROLE_WARN_1_ID = '1550754107978022912'; 
+const ROLE_WARN_2_ID = '1550754764025765890'; 
+const ROLE_MEMBRE_ID = '1524099902542577735'; 
 
 const commands = [
   new SlashCommandBuilder()
@@ -97,7 +98,7 @@ const commands = [
     ),
   new SlashCommandBuilder()
     .setName('lock')
-    .setDescription('Verrouille le salon pour le rôle spécifié (Modérateur)')
+    .setDescription('Verrouille le salon pour le rôle membre (Modérateur)')
     .addStringOption(option =>
       option.setName('raison')
         .setDescription('La raison du verrouillage')
@@ -105,7 +106,7 @@ const commands = [
     ),
   new SlashCommandBuilder()
     .setName('unlock')
-    .setDescription('Déverrouille le salon pour le rôle spécifié (Modérateur)'),
+    .setDescription('Déverrouille le salon pour le rôle membre (Modérateur)'),
   new SlashCommandBuilder()
     .setName('userinfo')
     .setDescription('Affiche les informations d un utilisateur')
@@ -242,7 +243,7 @@ client.on('interactionCreate', async (interaction) => {
 
     if (targetMember) {
       try {
-        if (userWarns.length === 1 && ROLE_WARN_1_ID !== 'ID_ROLE_PREMIER_WARN') {
+        if (userWarns.length === 1) {
           await targetMember.roles.add(ROLE_WARN_1_ID);
           sanctionMessage += `\n*(Rôle "Warn 1" attribué automatiquement)*`;
         } 
@@ -250,10 +251,9 @@ client.on('interactionCreate', async (interaction) => {
           await targetMember.timeout(10 * 60 * 1000, `Sanction automatique : 2ème avertissement.`);
           sanctionMessage += `\n🚨 **Sanction automatique (2ème avertissement) :** Timeout de 10 minutes appliqué !`;
 
-          if (ROLE_WARN_2_ID !== 'ID_ROLE_DEUXIEME_WARN') {
-            await targetMember.roles.add(ROLE_WARN_2_ID);
-            sanctionMessage += ` + Rôle "Warn 2" attribué.`;
-          }
+          await targetMember.roles.remove(ROLE_WARN_1_ID).catch(() => {});
+          await targetMember.roles.add(ROLE_WARN_2_ID);
+          sanctionMessage += ` + Rôle "Warn 2" attribué.`;
         }
       } catch (err) {
         console.error("Erreur attribution rôle/timeout :", err);
@@ -296,12 +296,8 @@ client.on('interactionCreate', async (interaction) => {
 
     if (targetMember) {
       try {
-        if (ROLE_WARN_1_ID && ROLE_WARN_1_ID !== 'ID_ROLE_PREMIER_WARN') {
-          await targetMember.roles.remove(ROLE_WARN_1_ID).catch(() => {});
-        }
-        if (ROLE_WARN_2_ID && ROLE_WARN_2_ID !== 'ID_ROLE_DEUXIEME_WARN') {
-          await targetMember.roles.remove(ROLE_WARN_2_ID).catch(() => {});
-        }
+        await targetMember.roles.remove(ROLE_WARN_1_ID).catch(() => {});
+        await targetMember.roles.remove(ROLE_WARN_2_ID).catch(() => {});
       } catch (err) {
         console.error("Erreur lors du retrait des rôles :", err);
       }
