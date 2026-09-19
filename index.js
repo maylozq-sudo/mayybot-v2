@@ -15,9 +15,10 @@ const warningsMap = new Map();
 const LIMIT_MESSAGES = 3; 
 const TIME_WINDOW = 5000;  
 
-// ID de tes rôles de warn configurés
-const ROLE_WARN_1_ID = '1550754107978022912'; 
-const ROLE_WARN_2_ID = '1550754764025765890'; 
+// ID de tes rôles
+const ROLE_WARN_1_ID = 'ID_ROLE_PREMIER_WARN'; 
+const ROLE_WARN_2_ID = 'ID_ROLE_DEUXIEME_WARN'; 
+const ROLE_MEMBRE_ID = '1524099902542577735'; // ID du rôle à bloquer lors du lock
 
 const commands = [
   new SlashCommandBuilder()
@@ -96,7 +97,7 @@ const commands = [
     ),
   new SlashCommandBuilder()
     .setName('lock')
-    .setDescription('Verrouille le salon actuel (Interdit d écrire pour les membres) (Modérateur)')
+    .setDescription('Verrouille le salon pour le rôle spécifié (Modérateur)')
     .addStringOption(option =>
       option.setName('raison')
         .setDescription('La raison du verrouillage')
@@ -104,7 +105,7 @@ const commands = [
     ),
   new SlashCommandBuilder()
     .setName('unlock')
-    .setDescription('Déverrouille le salon actuel (Modérateur)'),
+    .setDescription('Déverrouille le salon pour le rôle spécifié (Modérateur)'),
   new SlashCommandBuilder()
     .setName('userinfo')
     .setDescription('Affiche les informations d un utilisateur')
@@ -241,7 +242,7 @@ client.on('interactionCreate', async (interaction) => {
 
     if (targetMember) {
       try {
-        if (userWarns.length === 1) {
+        if (userWarns.length === 1 && ROLE_WARN_1_ID !== 'ID_ROLE_PREMIER_WARN') {
           await targetMember.roles.add(ROLE_WARN_1_ID);
           sanctionMessage += `\n*(Rôle "Warn 1" attribué automatiquement)*`;
         } 
@@ -249,10 +250,10 @@ client.on('interactionCreate', async (interaction) => {
           await targetMember.timeout(10 * 60 * 1000, `Sanction automatique : 2ème avertissement.`);
           sanctionMessage += `\n🚨 **Sanction automatique (2ème avertissement) :** Timeout de 10 minutes appliqué !`;
 
-          // Retire le premier rôle et ajoute le second pour une progression propre
-          await targetMember.roles.remove(ROLE_WARN_1_ID).catch(() => {});
-          await targetMember.roles.add(ROLE_WARN_2_ID);
-          sanctionMessage += ` + Rôle "Warn 2" attribué.`;
+          if (ROLE_WARN_2_ID !== 'ID_ROLE_DEUXIEME_WARN') {
+            await targetMember.roles.add(ROLE_WARN_2_ID);
+            sanctionMessage += ` + Rôle "Warn 2" attribué.`;
+          }
         }
       } catch (err) {
         console.error("Erreur attribution rôle/timeout :", err);
@@ -295,8 +296,12 @@ client.on('interactionCreate', async (interaction) => {
 
     if (targetMember) {
       try {
-        await targetMember.roles.remove(ROLE_WARN_1_ID).catch(() => {});
-        await targetMember.roles.remove(ROLE_WARN_2_ID).catch(() => {});
+        if (ROLE_WARN_1_ID && ROLE_WARN_1_ID !== 'ID_ROLE_PREMIER_WARN') {
+          await targetMember.roles.remove(ROLE_WARN_1_ID).catch(() => {});
+        }
+        if (ROLE_WARN_2_ID && ROLE_WARN_2_ID !== 'ID_ROLE_DEUXIEME_WARN') {
+          await targetMember.roles.remove(ROLE_WARN_2_ID).catch(() => {});
+        }
       } catch (err) {
         console.error("Erreur lors du retrait des rôles :", err);
       }
@@ -332,13 +337,13 @@ client.on('interactionCreate', async (interaction) => {
     const reason = interaction.options.getString('raison') || "Aucune raison spécifiée";
 
     try {
-      await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
+      await interaction.channel.permissionOverwrites.edit(ROLE_MEMBRE_ID, {
         SendMessages: false
       });
 
       const embed = new EmbedBuilder()
         .setTitle('🔒 Salon Verrouillé')
-        .setDescription(`Ce salon a été verrouillé par un modérateur.\n**Raison :** ${reason}`)
+        .setDescription(`Ce salon a été verrouillé pour le rôle membre.\n**Raison :** ${reason}`)
         .setColor('#ff0000');
 
       await interaction.reply({ embeds: [embed] });
@@ -354,13 +359,13 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     try {
-      await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
+      await interaction.channel.permissionOverwrites.edit(ROLE_MEMBRE_ID, {
         SendMessages: null
       });
 
       const embed = new EmbedBuilder()
         .setTitle('🔓 Salon Déverrouillé')
-        .setDescription('Ce salon a été déverrouillé. Vous pouvez de nouveau écrire.')
+        .setDescription('Ce salon a été déverrouillé pour le rôle membre.')
         .setColor('#00ff00');
 
       await interaction.reply({ embeds: [embed] });
