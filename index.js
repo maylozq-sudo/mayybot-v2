@@ -15,7 +15,7 @@ const warningsMap = new Map();
 const LIMIT_MESSAGES = 3; 
 const TIME_WINDOW = 5000;  
 
-// ID de tes rôles configurés
+// ID de tes rôles de warn configurés
 const ROLE_WARN_1_ID = '1550754107978022912'; 
 const ROLE_WARN_2_ID = '1550754764025765890'; 
 
@@ -94,6 +94,17 @@ const commands = [
         .setDescription('La raison du mute')
         .setRequired(false)
     ),
+  new SlashCommandBuilder()
+    .setName('lock')
+    .setDescription('Verrouille le salon actuel (Interdit d écrire pour les membres) (Modérateur)')
+    .addStringOption(option =>
+      option.setName('raison')
+        .setDescription('La raison du verrouillage')
+        .setRequired(false)
+    ),
+  new SlashCommandBuilder()
+    .setName('unlock')
+    .setDescription('Déverrouille le salon actuel (Modérateur)'),
   new SlashCommandBuilder()
     .setName('userinfo')
     .setDescription('Affiche les informations d un utilisateur')
@@ -232,20 +243,20 @@ client.on('interactionCreate', async (interaction) => {
       try {
         if (userWarns.length === 1) {
           await targetMember.roles.add(ROLE_WARN_1_ID);
-          sanctionMessage += `\n*(Rôle "Warn 🛠️ 1" attribué automatiquement)*`;
+          sanctionMessage += `\n*(Rôle "Warn 1" attribué automatiquement)*`;
         } 
         else if (userWarns.length >= 2) {
-          // Retire le rôle du 1er warn pour basculer sur le 2ème proprement (optionnel mais propre)
-          await targetMember.roles.remove(ROLE_WARN_1_ID).catch(() => {});
-          
-          await targetMember.roles.add(ROLE_WARN_2_ID);
           await targetMember.timeout(10 * 60 * 1000, `Sanction automatique : 2ème avertissement.`);
-          
-          sanctionMessage += `\n🚨 **Sanction automatique (2ème avertissement) :** Rôle "Warn 🛠️ 2" attribué + Timeout de 10 minutes appliqué !`;
+          sanctionMessage += `\n🚨 **Sanction automatique (2ème avertissement) :** Timeout de 10 minutes appliqué !`;
+
+          // Retire le premier rôle et ajoute le second pour une progression propre
+          await targetMember.roles.remove(ROLE_WARN_1_ID).catch(() => {});
+          await targetMember.roles.add(ROLE_WARN_2_ID);
+          sanctionMessage += ` + Rôle "Warn 2" attribué.`;
         }
       } catch (err) {
         console.error("Erreur attribution rôle/timeout :", err);
-        sanctionMessage += `\n*(Erreur : vérifie que le rôle du bot est bien placé au-dessus des rôles de warn dans les paramètres)*`;
+        sanctionMessage += `\n*(Erreur : vérifie que le rôle du bot est bien au-dessus des rôles de warn)*`;
       }
     }
 
@@ -310,6 +321,52 @@ client.on('interactionCreate', async (interaction) => {
     } catch (error) {
       console.error(error);
       await interaction.reply({ content: "Impossible de rendre ce membre muet.", ephemeral: true });
+    }
+  }
+
+  if (commandName === 'lock') {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
+      return interaction.reply({ content: "Tu n'as pas la permission de verrouiller des salons !", ephemeral: true });
+    }
+
+    const reason = interaction.options.getString('raison') || "Aucune raison spécifiée";
+
+    try {
+      await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
+        SendMessages: false
+      });
+
+      const embed = new EmbedBuilder()
+        .setTitle('🔒 Salon Verrouillé')
+        .setDescription(`Ce salon a été verrouillé par un modérateur.\n**Raison :** ${reason}`)
+        .setColor('#ff0000');
+
+      await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+      console.error(error);
+      await interaction.reply({ content: "Impossible de verrouiller ce salon.", ephemeral: true });
+    }
+  }
+
+  if (commandName === 'unlock') {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
+      return interaction.reply({ content: "Tu n'as pas la permission de déverrouiller des salons !", ephemeral: true });
+    }
+
+    try {
+      await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
+        SendMessages: null
+      });
+
+      const embed = new EmbedBuilder()
+        .setTitle('🔓 Salon Déverrouillé')
+        .setDescription('Ce salon a été déverrouillé. Vous pouvez de nouveau écrire.')
+        .setColor('#00ff00');
+
+      await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+      console.error(error);
+      await interaction.reply({ content: "Impossible de déverrouiller ce salon.", ephemeral: true });
     }
   }
 
