@@ -9,12 +9,12 @@ const client = new Client({
   ]
 });
 
-// Map pour suivre la fréquence d'envoi de messages des utilisateurs
+// Map pour suivre la fréquence et stocker les messages des utilisateurs
 const userMessageMap = new Map();
 
 // Configuration Anti-Spam
-const LIMIT_MESSAGES = 5; // Nombre de messages max
-const TIME_WINDOW = 5000;  // Dans un délai de 5 secondes (5000 ms)
+const LIMIT_MESSAGES = 5; // Nombre max de messages tolérés
+const TIME_WINDOW = 5000;  // Fenêtre de 5 secondes (5000 ms)
 
 client.once('ready', () => {
   console.log(`Bot prêt ! Connecté en tant que ${client.user.tag}`);
@@ -23,7 +23,7 @@ client.once('ready', () => {
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
 
-  // --- SYSTÈME ANTI-SPAM ---
+  // --- SYSTÈME ANTI-SPAM (SUPPRESSION DE TOUT L'HISTORIQUE RÉCENT) ---
   const userId = message.author.id;
   const now = Date.now();
 
@@ -31,22 +31,36 @@ client.on('messageCreate', async (message) => {
     userMessageMap.set(userId, []);
   }
 
-  const userTimestamps = userMessageMap.get(userId);
-  userTimestamps.push(now);
+  const userHistory = userMessageMap.get(userId);
+  // On ajoute le message actuel à l'historique
+  userHistory.push({ time: now, msg: message });
 
-  // Conserver uniquement les timestamps dans la fenêtre de temps (5 sec)
-  const recentMessages = userTimestamps.filter(timestamp => now - timestamp < TIME_WINDOW);
-  userMessageMap.set(userId, recentMessages);
+  // Conserver uniquement les messages envoyés dans les 5 dernières secondes
+  const recentHistory = userHistory.filter(entry => now - entry.time < TIME_WINDOW);
+  userMessageMap.set(userId, recentHistory);
 
-  // Si l'utilisateur dépasse la limite
-  if (recentMessages.length > LIMIT_MESSAGES) {
+  // Détection du dépassement de limite
+  if (recentHistory.length > LIMIT_MESSAGES) {
     if (message.channel.permissionsFor(message.guild.members.me).has(PermissionFlagsBits.ManageMessages)) {
-      await message.delete().catch(() => {});
       
-      if (recentMessages.length === LIMIT_MESSAGES + 1) {
-        const warning = await message.channel.send(`⚠️ ${message.author}, mollo sur le spam ! Tes messages trop rapides sont supprimés.`);
-        setTimeout(() => warning.delete().catch(() => {}), 4000);
+      // Récupérer et supprimer tous les messages récents envoyés par cet utilisateur
+      const messagesToDelete = recentHistory.map(entry => entry.msg);
+      
+      try {
+        await message.channel.bulkDelete(messagesToDelete, true);
+      } catch (err) {
+        // En cas d'échec de suppression en masse, suppression un par un
+        for (const entry of recentHistory) {
+          await entry.msg.delete().catch(() => {});
+        }
       }
+
+      // Vider l'historique pour cet utilisateur après suppression
+      userMessageMap.set(userId, []);
+
+      // Avertissement dans le salon
+      const warning = await message.channel.send(`⚠️ ${message.author}, le spam est interdit ! Tous tes récents messages ont été supprimés.`);
+      setTimeout(() => warning.delete().catch(() => {}), 4000);
       return;
     }
   }
