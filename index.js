@@ -9,15 +9,12 @@ const client = new Client({
   ]
 });
 
-// Maps pour stocker les données du bot
-const userMessageMap = new Map(); // Anti-spam
-const warningsMap = new Map();    // Stockage des warns (userId -> tableau de warns)
+const userMessageMap = new Map();
+const warningsMap = new Map();
 
-// Configurations
 const LIMIT_MESSAGES = 3; 
 const TIME_WINDOW = 5000;  
 
-// Définition des commandes Slash
 const commands = [
   new SlashCommandBuilder()
     .setName('clear')
@@ -114,10 +111,8 @@ client.once('ready', async () => {
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
 
-  // --- 1. FILTRE ANTI-INVITATION DISCORD ---
   const inviteRegex = /(https?:\/\/)?(www\.)?(discord\.(gg|io|me|li|club)|discordapp\.com\/invite|discord\.com\/invite)\/[a-zA-Z0-9]+/i;
   if (inviteRegex.test(message.content)) {
-    // Si l'auteur n'est pas modérateur, on supprime le lien
     if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
       await message.delete().catch(() => {});
       const warningMsg = await message.channel.send(`⚠️ ${message.author}, les liens d'invitation vers d'autres serveurs sont interdits ici !`);
@@ -126,7 +121,6 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // --- 2. SYSTÈME ANTI-SPAM AUTOMATIQUE ---
   const userId = message.author.id;
   const now = Date.now();
 
@@ -161,13 +155,11 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-// --- GESTION DES COMMANDES SLASH ---
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   const { commandName } = interaction;
 
-  // /clear
   if (commandName === 'clear') {
     if (!interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
       return interaction.reply({ content: "Tu n'as pas la permission de gérer les messages !", ephemeral: true });
@@ -181,11 +173,10 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.editReply(`🧹 **${deleted.size}** message(s) supprimé(s) avec succès !`);
     } catch (error) {
       console.error(error);
-      await interaction.editReply("Erreur lors de la suppression (les messages de plus de 14 jours ne peuvent pas être supprimés).");
+      await interaction.editReply("Erreur lors de la suppression.");
     }
   }
 
-  // /spam
   if (commandName === 'spam') {
     if (!interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
       return interaction.reply({ content: "Seuls les modérateurs peuvent utiliser cette commande !", ephemeral: true });
@@ -201,7 +192,6 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 
-  // /warn
   if (commandName === 'warn') {
     if (!interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
       return interaction.reply({ content: "Tu n'as pas la permission d'avertir des membres !", ephemeral: true });
@@ -223,7 +213,6 @@ client.on('interactionCreate', async (interaction) => {
     await interaction.reply({ content: `⚠️ **${target.tag}** a reçu un avertissement.\n**Raison :** ${reason}`, ephemeral: false });
   }
 
-  // /warnings
   if (commandName === 'warnings') {
     const target = interaction.options.getUser('membre');
     const userWarns = warningsMap.get(target.id) || [];
@@ -232,7 +221,7 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.reply({ content: `✅ **${target.tag}** n'a aucun avertissement à son actif.`, ephemeral: true });
     }
 
-    let description = userWarns.map((w, index) => `**${index + 1}.**${w.reason} *(Modérateur : ${w.moderator} -${w.date})*`).join('\n');
+    let description = userWarns.map((w, index) => `**${index + 1}.** ${w.reason} *(Modérateur : ${w.moderator} - ${w.date})*`).join('\n');
 
     const embed = new EmbedBuilder()
       .setTitle(`Avertissements de ${target.tag}`)
@@ -242,7 +231,6 @@ client.on('interactionCreate', async (interaction) => {
     await interaction.reply({ embeds: [embed], ephemeral: true });
   }
 
-  // /timeout (Mute)
   if (commandName === 'timeout') {
     if (!interaction.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
       return interaction.reply({ content: "Tu n'as pas la permission de rendre des membres muets !", ephemeral: true });
@@ -255,14 +243,13 @@ client.on('interactionCreate', async (interaction) => {
     try {
       const durationMs = minutes * 60 * 1000;
       await member.timeout(durationMs, reason);
-      await interaction.reply({ content: `🔇 **${member.user.tag}`} a été mis en sourdine pendant **${minutes} minute(s)**.\n**Raison :** ${reason}`, ephemeral: false });
+      await interaction.reply({ content: `🔇 **${member.user.tag}** a été mis en sourdine pendant **${minutes} minute(s)**.\n**Raison :** ${reason}`, ephemeral: false });
     } catch (error) {
       console.error(error);
-      await interaction.reply({ content: "Impossible de rendre ce membre muet (vérifie que le bot a un rôle supérieur au sien).", ephemeral: true });
+      await interaction.reply({ content: "Impossible de rendre ce membre muet.", ephemeral: true });
     }
   }
 
-  // /userinfo
   if (commandName === 'userinfo') {
     const member = interaction.options.getMember('membre') || interaction.member;
     const user = member.user;
