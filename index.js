@@ -97,12 +97,17 @@ client.once('ready', async () => {
 
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   try {
-    console.log('Enregistrement des commandes slash...');
-    await rest.put(
-      Routes.applicationCommands(client.user.id),
-      { body: commands.map(cmd => cmd.toJSON()) },
-    );
-    console.log('Commandes slash enregistrées avec succès !');
+    console.log('Enregistrement instantané des commandes sur le serveur...');
+    
+    // Récupère le premier serveur (guild) où le bot est connecté pour forcer l'affichage immédiat
+    const guilds = await client.guilds.fetch();
+    for (const [guildId] of guilds) {
+      await rest.put(
+        Routes.applicationGuildCommands(client.user.id, guildId),
+        { body: commands.map(cmd => cmd.toJSON()) },
+      );
+    }
+    console.log('Commandes enregistrées avec succès sur le serveur !');
   } catch (error) {
     console.error(error);
   }
